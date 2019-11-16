@@ -5,7 +5,7 @@ In dieser Übung erweitern Sie die Anwendung aus der vorherigen Übung, um die A
 1. Erstellen Sie eine neue **Eigenschaftenlisten** Datei im **GraphTutorial** -Projekt mit dem Namen **AuthSettings. plist**.
 1. Fügen Sie die folgenden Elemente zur Datei im **Stamm** Wörterbuch hinzu.
 
-    | Schlüssel | Typ | Wert |
+    | Key | Typ | Wert |
     |-----|------|-------|
     | `AppId` | Zeichenfolge | Die Anwendungs-ID aus dem Azure-Portal |
     | `GraphScopes` | Array | Zwei Zeichenfolgenwerte `User.Read` : und`Calendars.Read` |
@@ -21,6 +21,11 @@ In diesem Abschnitt Konfigurieren Sie das Projekt für MSAL, erstellen eine Auth
 
 ### <a name="configure-project-for-msal"></a>Konfigurieren des Projekts für MSAL
 
+1. Fügen Sie der Projektfunktion eine neue Schlüsselbund Gruppe hinzu.
+    1. Wählen Sie das **GraphTutorial** -Projekt aus, und **Signieren Sie #a0 Funktionen**.
+    1. Wählen Sie **+-Funktion**aus, und doppelklicken Sie dann auf **Schlüsselbund Freigabe**.
+    1. Fügen Sie eine Schlüsselbund Gruppe mit `com.microsoft.adalcache`dem Wert hinzu.
+
 1. Steuerelement klicken Sie auf **Info. plist** , und wählen Sie dann **Öffnen als**, dann **Quellcode**aus.
 1. Fügen Sie das folgende innerhalb `<dict>` des-Elements hinzu.
 
@@ -34,6 +39,7 @@ In diesem Abschnitt Konfigurieren Sie das Projekt für MSAL, erstellen eine Auth
         </array>
       </dict>
     </array>
+    <key>LSApplicationQueriesSchemes</key>
     <array>
         <string>msauthv2</string>
         <string>msauthv3</string>
@@ -66,8 +72,11 @@ In diesem Abschnitt Konfigurieren Sie das Projekt für MSAL, erstellen eine Auth
     ```Swift
     import Foundation
     import MSAL
+    import MSGraphClientSDK
 
-    class AuthenticationManager {
+    // Implement the MSAuthenticationProvider interface so
+    // this class can be used as an auth provider for the Graph SDK
+    class AuthenticationManager: NSObject, MSAuthenticationProvider {
 
         // Implement singleton pattern
         static let instance = AuthenticationManager()
@@ -76,7 +85,7 @@ In diesem Abschnitt Konfigurieren Sie das Projekt für MSAL, erstellen eine Auth
         private let appId: String
         private let graphScopes: Array<String>
 
-        private init() {
+        private override init() {
             // Get app ID and scopes from AuthSettings.plist
             let bundle = Bundle.main
             let authConfigPath = bundle.path(forResource: "AuthSettings", ofType: "plist")!
@@ -87,21 +96,25 @@ In diesem Abschnitt Konfigurieren Sie das Projekt für MSAL, erstellen eine Auth
 
             do {
                 // Create the MSAL client
-                try self.publicClient = MSALPublicClientApplication(clientId: self.appId,
-                                                                    keychainGroup: bundle.bundleIdentifier)
+                try self.publicClient = MSALPublicClientApplication(clientId: self.appId)
             } catch {
                 print("Error creating MSAL public client: \(error)")
                 self.publicClient = nil
             }
         }
 
-        public func getPublicClient() -> MSALPublicClientApplication? {
-            return self.publicClient
+        // Required function for the MSAuthenticationProvider interface
+        func getAccessToken(for authProviderOptions: MSAuthenticationProviderOptions!, andCompletion completion: ((String?, Error?) -> Void)!) {
+            getTokenSilently(completion: completion)
         }
 
-        public func getTokenInteractively(completion: @escaping(_ accessToken: String?, Error?) -> Void) {
+        public func getTokenInteractively(parentView: UIViewController, completion: @escaping(_ accessToken: String?, Error?) -> Void) {
+            let webParameters = MSALWebviewParameters(parentViewController: parentView)
+            let interactiveParameters = MSALInteractiveTokenParameters(scopes: self.graphScopes,
+                                                                       webviewParameters: webParameters)
+
             // Call acquireToken to open a browser so the user can sign in
-            publicClient?.acquireToken(forScopes: self.graphScopes, completionBlock: {
+            publicClient?.acquireToken(with: interactiveParameters, completionBlock: {
                 (result: MSALResult?, error: Error?) in
                 guard let tokenResult = result, error == nil else {
                     print("Error getting token interactively: \(String(describing: error))")
@@ -126,7 +139,8 @@ In diesem Abschnitt Konfigurieren Sie das Projekt für MSAL, erstellen eine Auth
 
             if (userAccount != nil) {
                 // Attempt to get token silently
-                publicClient?.acquireTokenSilent(forScopes: self.graphScopes, account: userAccount!, completionBlock: {
+                let silentParameters = MSALSilentTokenParameters(scopes: self.graphScopes, account: userAccount!)
+                publicClient?.acquireTokenSilent(with: silentParameters, completionBlock: {
                     (result: MSALResult?, error: Error?) in
                     guard let tokenResult = result, error == nil else {
                         print("Error getting token silently: \(String(describing: error))")
@@ -140,7 +154,7 @@ In diesem Abschnitt Konfigurieren Sie das Projekt für MSAL, erstellen eine Auth
             } else {
                 print("No account in cache")
                 completion(nil, NSError(domain: "AuthenticationManager",
-                                        code: MSALErrorCode.interactionRequired.rawValue, userInfo: nil))
+                                        code: MSALError.interactionRequired.rawValue, userInfo: nil))
             }
         }
 
@@ -201,7 +215,7 @@ In diesem Abschnitt Konfigurieren Sie das Projekt für MSAL, erstellen eine Auth
             spinner.start(container: self)
 
             // Do an interactive sign in
-            AuthenticationManager.instance.getTokenInteractively {
+            AuthenticationManager.instance.getTokenInteractively(parentView: self) {
                 (token: String?, error: Error?) in
 
                 DispatchQueue.main.async {
@@ -246,16 +260,6 @@ Wenn Sie sich bei der App anmelden, sollten Sie ein Zugriffstoken sehen, das im 
 
 In diesem Abschnitt erstellen Sie eine Hilfsklasse, die alle Aufrufe von Microsoft Graph enthält, und aktualisieren Sie `WelcomeViewController` , um die neue Klasse zum Abrufen des angemeldeten Benutzers zu verwenden.
 
-1. Öffnen Sie **AuthenticationManager. Swift** , und fügen Sie der `AuthenticationManager` -Klasse die folgende Funktion hinzu.
-
-    ```Swift
-    public func getGraphAuthProvider() -> MSALAuthenticationProvider? {
-        // Create an MSAL auth provider for use with the Graph client
-        return MSALAuthenticationProvider(publicClientApplication: self.publicClient,
-                                          andScopes: self.graphScopes)
-    }
-    ```
-
 1. Erstellen Sie eine neue **SWIFT-Datei** im **GraphTutorial** -Projekt mit dem Namen **graphmanager. Swift**. Fügen Sie den folgenden Code in die Datei ein:
 
     ```Swift
@@ -271,7 +275,7 @@ In diesem Abschnitt erstellen Sie eine Hilfsklasse, die alle Aufrufe von Microso
         private let client: MSHTTPClient?
 
         private init() {
-            client = MSClientFactory.createHTTPClient(with: AuthenticationManager.instance.getGraphAuthProvider())
+            client = MSClientFactory.createHTTPClient(with: AuthenticationManager.instance)
         }
 
         public func getMe(completion: @escaping(MSGraphUser?, Error?) -> Void) {

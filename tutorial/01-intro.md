@@ -13,7 +13,7 @@ Bevor Sie mit diesem Lernprogramm beginnen, sollten Sie Folgendes auf Ihrem Entw
 - [CocoaPods](https://cocoapods.org)
 
 > [!NOTE]
-> Dieses Lernprogramm wurde mit Xcode Version 10,3 und CocoaPods Version 1.7.5 geschrieben. Die Schritte in diesem Leitfaden funktionieren möglicherweise mit anderen Versionen, jedoch nicht getestet.
+> Dieses Tutorial wurde mit Xcode Version 11.2.1 und CocoaPods Version 1.8.4 geschrieben die Schritte in diesem Leitfaden funktionieren möglicherweise mit anderen Versionen, aber das wurde nicht getestet.
 
 ## <a name="feedback"></a>Feedback
 
